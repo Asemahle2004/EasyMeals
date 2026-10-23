@@ -1,0 +1,61 @@
+name: Build HomeGuard ESP APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Reassemble Android source
+        run: |
+          cat homeguard_source.part1 homeguard_source.part2 homeguard_source.part3 homeguard_source.part4 > homeguard_source.b64
+          base64 -d homeguard_source.b64 > homeguard_source.zip
+          mkdir -p buildsrc
+          unzip -q homeguard_source.zip -d buildsrc
+          test -f buildsrc/settings.gradle
+          test -f buildsrc/app/src/main/AndroidManifest.xml
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Build Android APK
+        working-directory: buildsrc
+        run: gradle :app:assembleDebug --stacktrace
+
+      - name: Prepare APK
+        run: cp buildsrc/app/build/outputs/apk/debug/app-debug.apk HomeGuardESP-v1.0.apk
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HomeGuardESP-v1.0
+          path: HomeGuardESP-v1.0.apk
+
+      - name: Publish or replace GitHub Release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view homeguard-esp-v1.0.0 >/dev/null 2>&1; then
+            gh release upload homeguard-esp-v1.0.0 HomeGuardESP-v1.0.apk --clobber
+          else
+            gh release create homeguard-esp-v1.0.0 HomeGuardESP-v1.0.apk \
+              --title "HomeGuard ESP v1.0" \
+              --notes "Prototype Android security monitor for ESP32 + ESP32-CAM. Debug-signed APK for direct installation and testing."
+          fi
