@@ -1,0 +1,65 @@
+name: Build HomeGuard ESP v1.1 APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Reassemble original Android source
+        run: |
+          cat homeguard_source.part1 homeguard_source.part2 homeguard_source.part3 homeguard_source.part4 > homeguard_source.b64
+          base64 -d homeguard_source.b64 > homeguard_source.zip
+          mkdir -p buildsrc
+          unzip -q homeguard_source.zip -d buildsrc
+
+      - name: Apply v1.1 app patch
+        run: |
+          base64 -d homeguard_v11_index.gz.b64 | gunzip > buildsrc/app/src/main/assets/index.html
+          grep -q "MQTT Round-trip Test" buildsrc/app/src/main/assets/index.html
+          grep -q "home/security/#" buildsrc/app/src/main/assets/index.html
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Build APK
+        working-directory: buildsrc
+        run: gradle :app:assembleDebug --stacktrace
+
+      - name: Prepare APK
+        run: cp buildsrc/app/build/outputs/apk/debug/app-debug.apk HomeGuardESP-v1.1.apk
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HomeGuardESP-v1.1
+          path: HomeGuardESP-v1.1.apk
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view homeguard-esp-v1.1.0 >/dev/null 2>&1; then
+            gh release upload homeguard-esp-v1.1.0 HomeGuardESP-v1.1.apk --clobber
+          else
+            gh release create homeguard-esp-v1.1.0 HomeGuardESP-v1.1.apk \
+              --title "HomeGuard ESP v1.1" \
+              --notes "Adds exact MQTT subscription diagnostics, wildcard home/security/# subscription, message counter and MQTT round-trip test."
+          fi
